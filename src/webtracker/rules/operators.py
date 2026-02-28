@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+
+from webtracker.config import Operator
+
+# Type alias for operator functions
+OperatorFunc = Callable[[str | None, str | float | None, str | None], bool]
 
 
 def evaluate_operator(
-    operator: str,
+    operator: Operator,
     current_value: str | None,
     expected_value: str | float | None,
     previous_value: str | None = None,
@@ -16,6 +22,21 @@ def evaluate_operator(
     if func is None:
         raise ValueError(f"Unknown operator: {operator}")
     return func(current_value, expected_value, previous_value)
+
+
+def compute_percent_change(current: str | None, previous: str | None) -> float | None:
+    """Compute the signed percentage change from previous to current.
+
+    Returns positive for increases, negative for decreases, or None if not computable.
+    """
+    try:
+        cur = float(current)
+        prv = float(previous)
+        if prv == 0:
+            return None
+        return ((cur - prv) / prv) * 100
+    except (TypeError, ValueError):
+        return None
 
 
 def _equals(current: str | None, expected: str | float | None, _prev: str | None) -> bool:
@@ -79,14 +100,11 @@ def _disappeared(current: str | None, _expected: str | float | None, prev: str |
 def _decreased_by_percent(
     current: str | None, expected: str | float | None, prev: str | None
 ) -> bool:
+    pct = compute_percent_change(current, prev)
+    if pct is None:
+        return False
     try:
-        cur = float(current)
-        prv = float(prev)
-        threshold = float(expected)
-        if prv == 0:
-            return False
-        pct_decrease = ((prv - cur) / prv) * 100
-        return pct_decrease >= threshold
+        return -pct >= float(expected)
     except (TypeError, ValueError):
         return False
 
@@ -94,14 +112,11 @@ def _decreased_by_percent(
 def _increased_by_percent(
     current: str | None, expected: str | float | None, prev: str | None
 ) -> bool:
+    pct = compute_percent_change(current, prev)
+    if pct is None:
+        return False
     try:
-        cur = float(current)
-        prv = float(prev)
-        threshold = float(expected)
-        if prv == 0:
-            return False
-        pct_increase = ((cur - prv) / prv) * 100
-        return pct_increase >= threshold
+        return pct >= float(expected)
     except (TypeError, ValueError):
         return False
 
@@ -114,19 +129,19 @@ def _not_exists(current: str | None, _expected: str | float | None, _prev: str |
     return current is None
 
 
-_OPERATORS: dict[str, callable] = {
-    "equals": _equals,
-    "not_equals": _not_equals,
-    "contains": _contains,
-    "not_contains": _not_contains,
-    "regex_match": _regex_match,
-    "less_than": _less_than,
-    "greater_than": _greater_than,
-    "changed": _changed,
-    "appeared": _appeared,
-    "disappeared": _disappeared,
-    "decreased_by_percent": _decreased_by_percent,
-    "increased_by_percent": _increased_by_percent,
-    "exists": _exists,
-    "not_exists": _not_exists,
+_OPERATORS: dict[Operator, OperatorFunc] = {
+    Operator.EQUALS: _equals,
+    Operator.NOT_EQUALS: _not_equals,
+    Operator.CONTAINS: _contains,
+    Operator.NOT_CONTAINS: _not_contains,
+    Operator.REGEX_MATCH: _regex_match,
+    Operator.LESS_THAN: _less_than,
+    Operator.GREATER_THAN: _greater_than,
+    Operator.CHANGED: _changed,
+    Operator.APPEARED: _appeared,
+    Operator.DISAPPEARED: _disappeared,
+    Operator.DECREASED_BY_PERCENT: _decreased_by_percent,
+    Operator.INCREASED_BY_PERCENT: _increased_by_percent,
+    Operator.EXISTS: _exists,
+    Operator.NOT_EXISTS: _not_exists,
 }

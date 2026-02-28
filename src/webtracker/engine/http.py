@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import httpx
 
+from webtracker.auth.cookies import cookies_as_httpx_dict, load_cookies_file
 from webtracker.config import AuthType, TrackerConfig
 from webtracker.engine.base import Engine, FetchResult
 
@@ -37,9 +35,9 @@ class HttpEngine(Engine):
         headers = {"User-Agent": _DEFAULT_USER_AGENT}
         headers.update(tracker.headers)
 
-        cookies = {}
+        cookies: dict[str, str] = {}
         if tracker.auth and tracker.auth.type == AuthType.COOKIES and tracker.auth.file:
-            cookies = _load_cookies(tracker.auth.file)
+            cookies = cookies_as_httpx_dict(load_cookies_file(tracker.auth.file))
 
         response = await client.get(tracker.url, headers=headers, cookies=cookies)
         response.raise_for_status()
@@ -54,20 +52,3 @@ class HttpEngine(Engine):
         if self._client:
             await self._client.aclose()
             self._client = None
-
-
-def _load_cookies(path: str) -> dict[str, str]:
-    """Load cookies from a JSON file."""
-    cookie_path = Path(path)
-    if not cookie_path.exists():
-        return {}
-
-    with open(cookie_path) as f:
-        data = json.load(f)
-
-    # Support both flat dict and list-of-dicts (browser export) formats
-    if isinstance(data, dict):
-        return data
-    if isinstance(data, list):
-        return {c["name"]: c["value"] for c in data if "name" in c and "value" in c}
-    return {}

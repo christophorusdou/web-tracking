@@ -101,32 +101,30 @@ def status(ctx: click.Context) -> None:
     config = load_config(ctx.obj["config_path"])
     from webtracker.state.store import StateStore
 
-    store = StateStore(config.settings.state_db)
+    with StateStore(config.settings.state_db) as store:
+        table = Table(title="Tracker Status")
+        table.add_column("ID", style="cyan")
+        table.add_column("Name", style="white")
+        table.add_column("Engine", style="yellow")
+        table.add_column("Interval", style="green")
+        table.add_column("Last Values", style="white")
+        table.add_column("Errors", style="red")
 
-    table = Table(title="Tracker Status")
-    table.add_column("ID", style="cyan")
-    table.add_column("Name", style="white")
-    table.add_column("Engine", style="yellow")
-    table.add_column("Interval", style="green")
-    table.add_column("Last Values", style="white")
-    table.add_column("Errors", style="red")
+        for tid, tracker in config.trackers.items():
+            values = store.get_values(tid)
+            errors = store.consecutive_error_count(tid)
+            values_str = ", ".join(f"{k}={v}" for k, v in values.items()) if values else "[dim]no data yet[/dim]"
 
-    for tid, tracker in config.trackers.items():
-        values = store.get_values(tid)
-        errors = store.consecutive_error_count(tid)
-        values_str = ", ".join(f"{k}={v}" for k, v in values.items()) if values else "[dim]no data yet[/dim]"
+            table.add_row(
+                tid,
+                tracker.name,
+                tracker.engine.value,
+                f"{tracker.schedule.interval}s",
+                values_str,
+                str(errors) if errors > 0 else "[green]0[/green]",
+            )
 
-        table.add_row(
-            tid,
-            tracker.name,
-            tracker.engine.value,
-            f"{tracker.schedule.interval}s",
-            values_str,
-            str(errors) if errors > 0 else "[green]0[/green]",
-        )
-
-    console.print(table)
-    store.close()
+        console.print(table)
 
 
 @cli.command()
@@ -141,25 +139,23 @@ def history(ctx: click.Context, tracker_id: str, field: str | None, last: int) -
 
     from webtracker.state.store import StateStore
 
-    store = StateStore(config.settings.state_db)
-    entries = store.get_history(tracker_id, field=field, limit=last)
+    with StateStore(config.settings.state_db) as store:
+        entries = store.get_history(tracker_id, field=field, limit=last)
 
-    if not entries:
-        console.print(f"[yellow]No history for tracker '{tracker_id}'[/yellow]")
-        store.close()
-        return
+        if not entries:
+            console.print(f"[yellow]No history for tracker '{tracker_id}'[/yellow]")
+            return
 
-    table = Table(title=f"History: {tracker_id}")
-    table.add_column("Time", style="dim")
-    table.add_column("Field", style="cyan")
-    table.add_column("Value", style="white")
+        table = Table(title=f"History: {tracker_id}")
+        table.add_column("Time", style="dim")
+        table.add_column("Field", style="cyan")
+        table.add_column("Value", style="white")
 
-    for entry in entries:
-        ts = datetime.fromtimestamp(entry["recorded_at"]).strftime("%Y-%m-%d %H:%M:%S")
-        table.add_row(ts, entry["field_name"], str(entry["value"]) if entry["value"] else "[dim]None[/dim]")
+        for entry in entries:
+            ts = datetime.fromtimestamp(entry["recorded_at"]).strftime("%Y-%m-%d %H:%M:%S")
+            table.add_row(ts, entry["field_name"], str(entry["value"]) if entry["value"] else "[dim]None[/dim]")
 
-    console.print(table)
-    store.close()
+        console.print(table)
 
 
 @cli.command("config")
@@ -202,21 +198,20 @@ def notify_test(ctx: click.Context, channel: str, message: str) -> None:
     from webtracker.notify.dispatcher import NotificationDispatcher
     from webtracker.state.store import StateStore
 
-    store = StateStore(config.settings.state_db)
-    dispatcher = NotificationDispatcher(config.notifications, store)
+    with StateStore(config.settings.state_db) as store:
+        dispatcher = NotificationDispatcher(config.notifications, store)
 
-    async def _send():
-        try:
-            success = await dispatcher.send_test(channel, message)
-            if success:
-                console.print(f"[green]Test notification sent to '{channel}'![/green]")
-            else:
-                console.print(f"[red]Failed to send test notification to '{channel}'[/red]")
-        finally:
-            await dispatcher.close()
-            store.close()
+        async def _send():
+            try:
+                success = await dispatcher.send_test(channel, message)
+                if success:
+                    console.print(f"[green]Test notification sent to '{channel}'![/green]")
+                else:
+                    console.print(f"[red]Failed to send test notification to '{channel}'[/red]")
+            finally:
+                await dispatcher.close()
 
-    asyncio.run(_send())
+        asyncio.run(_send())
 
 
 @notify_group.command("history")
@@ -230,27 +225,25 @@ def notify_history(ctx: click.Context, tracker: str | None, last: int) -> None:
 
     from webtracker.state.store import StateStore
 
-    store = StateStore(config.settings.state_db)
-    entries = store.get_notification_history(tracker_id=tracker, limit=last)
+    with StateStore(config.settings.state_db) as store:
+        entries = store.get_notification_history(tracker_id=tracker, limit=last)
 
-    if not entries:
-        console.print("[yellow]No notifications sent yet[/yellow]")
-        store.close()
-        return
+        if not entries:
+            console.print("[yellow]No notifications sent yet[/yellow]")
+            return
 
-    table = Table(title="Notification History")
-    table.add_column("Time", style="dim")
-    table.add_column("Tracker", style="cyan")
-    table.add_column("Channel", style="yellow")
-    table.add_column("Message", style="white")
+        table = Table(title="Notification History")
+        table.add_column("Time", style="dim")
+        table.add_column("Tracker", style="cyan")
+        table.add_column("Channel", style="yellow")
+        table.add_column("Message", style="white")
 
-    for entry in entries:
-        ts = datetime.fromtimestamp(entry["sent_at"]).strftime("%Y-%m-%d %H:%M:%S")
-        msg = entry["message"][:80] + "..." if len(entry["message"]) > 80 else entry["message"]
-        table.add_row(ts, entry["tracker_id"], entry["channel"], msg)
+        for entry in entries:
+            ts = datetime.fromtimestamp(entry["sent_at"]).strftime("%Y-%m-%d %H:%M:%S")
+            msg = entry["message"][:80] + "..." if len(entry["message"]) > 80 else entry["message"]
+            table.add_row(ts, entry["tracker_id"], entry["channel"], msg)
 
-    console.print(table)
-    store.close()
+        console.print(table)
 
 
 # ── Auth Commands ────────────────────────────────────────

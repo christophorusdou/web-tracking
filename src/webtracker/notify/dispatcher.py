@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from webtracker.config import (
@@ -76,21 +77,32 @@ class NotificationDispatcher:
             )
             return []
 
-        sent_to: list[str] = []
         notification_title = title or f"WebTracker: {tracker_id}"
 
+        # Resolve valid notifiers
+        valid: list[tuple[str, Notifier]] = []
         for name in channel_names:
             notifier = self._notifiers.get(name)
             if notifier is None:
                 logger.warning("Channel '%s' not found, skipping", name)
-                continue
+            else:
+                valid.append((name, notifier))
 
-            success = await notifier.send(
-                message=message,
-                title=notification_title,
-                priority=priority or "default",
-            )
-            if success:
+        if not valid:
+            return []
+
+        # Send to all channels concurrently
+        results = await asyncio.gather(
+            *(n.send(message=message, title=notification_title, priority=priority or "default")
+              for _, n in valid),
+            return_exceptions=True,
+        )
+
+        sent_to: list[str] = []
+        for (name, _), result in zip(valid, results):
+            if isinstance(result, Exception):
+                logger.error("Channel '%s' raised: %s", name, result)
+            elif result:
                 sent_to.append(name)
                 self._store.record_notification(tracker_id, rule_index, name, message)
 
@@ -112,14 +124,17 @@ class NotificationDispatcher:
         error_count = self._store.consecutive_error_count(tracker_id)
         if error_count >= self._settings.defaults.error_threshold:
             msg = f"Tracker '{tracker_id}' has failed {error_count} times.\nLatest error: {error}"
-            for name in self._settings.defaults.channels:
-                notifier = self._notifiers.get(name)
-                if notifier:
-                    await notifier.send(
-                        message=msg,
-                        title=f"WebTracker Error: {tracker_id}",
-                        priority="high",
-                    )
+            notifiers = [
+                self._notifiers[name]
+                for name in self._settings.defaults.channels
+                if name in self._notifiers
+            ]
+            if notifiers:
+                await asyncio.gather(
+                    *(n.send(message=msg, title=f"WebTracker Error: {tracker_id}", priority="high")
+                      for n in notifiers),
+                    return_exceptions=True,
+                )
 
     async def close(self) -> None:
         for notifier in self._notifiers.values():

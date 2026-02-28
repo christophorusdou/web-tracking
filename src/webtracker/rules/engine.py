@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import re
-
 from webtracker.config import ConditionConfig, Operator, RuleConfig
-from webtracker.rules.operators import evaluate_operator
+from webtracker.rules.operators import compute_percent_change, evaluate_operator
 
 
 def evaluate_rules(
@@ -48,7 +46,7 @@ def _evaluate_condition(
     previous = previous_values.get(condition.field)
 
     return evaluate_operator(
-        condition.operator.value,
+        condition.operator,
         current,
         condition.value,
         previous,
@@ -75,20 +73,13 @@ def _format_message(
     for field, value in previous_values.items():
         result = result.replace(f"${{prev_{field}}}", str(value) if value is not None else "N/A")
 
-    # Compute ${change_percent} if both current and previous price/value exist
-    change_pct_match = re.search(r"\$\{change_percent\}", result)
-    if change_pct_match:
-        # Try to find a numeric field that changed
+    # Compute ${change_percent} only if the placeholder is present
+    if "${change_percent}" in result:
         for field in current_values:
-            try:
-                cur = float(current_values.get(field, ""))
-                prev = float(previous_values.get(field, ""))
-                if prev != 0:
-                    pct = abs((prev - cur) / prev) * 100
-                    result = result.replace("${change_percent}", f"{pct:.1f}")
-                    break
-            except (TypeError, ValueError):
-                continue
+            pct = compute_percent_change(current_values.get(field), previous_values.get(field))
+            if pct is not None:
+                result = result.replace("${change_percent}", f"{abs(pct):.1f}")
+                break
         else:
             result = result.replace("${change_percent}", "?")
 

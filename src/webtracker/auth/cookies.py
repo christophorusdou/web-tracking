@@ -6,19 +6,11 @@ import json
 from pathlib import Path
 
 
-def export_cookies_from_profile(profile_dir: str, output_path: str, domain: str | None = None) -> int:
-    """Export cookies from a browser profile's cookie storage.
-
-    This is a helper to convert browser profile cookies to a portable JSON file.
-    Returns the number of cookies exported.
-    """
-    # Playwright stores cookies internally, so we use the Playwright API
-    # This function is called from the CLI with a running browser context
-    raise NotImplementedError("Use 'webtracker auth export-cookies' CLI command instead")
-
-
 def load_cookies_file(path: str | Path) -> list[dict]:
-    """Load cookies from a JSON file. Supports multiple formats."""
+    """Load cookies from a JSON file. Supports both flat dict and list-of-dicts formats.
+
+    Returns a canonical list of cookie dicts with at least 'name' and 'value'.
+    """
     path = Path(path)
     if not path.exists():
         return []
@@ -27,11 +19,32 @@ def load_cookies_file(path: str | Path) -> list[dict]:
         data = json.load(f)
 
     if isinstance(data, dict):
-        # Flat {name: value} format → convert to list
+        # Flat {name: value} format
         return [{"name": k, "value": v, "domain": "", "path": "/"} for k, v in data.items()]
     if isinstance(data, list):
-        return data
+        return [c for c in data if "name" in c and "value" in c]
     return []
+
+
+def cookies_as_httpx_dict(cookies: list[dict]) -> dict[str, str]:
+    """Convert canonical cookie list to a flat {name: value} dict for httpx."""
+    return {c["name"]: c["value"] for c in cookies}
+
+
+def cookies_as_playwright_list(cookies: list[dict]) -> list[dict]:
+    """Convert canonical cookie list to Playwright-compatible format."""
+    result = []
+    for c in cookies:
+        cookie = {
+            "name": c["name"],
+            "value": c["value"],
+            "domain": c.get("domain", ""),
+            "path": c.get("path", "/"),
+        }
+        if "expires" in c:
+            cookie["expires"] = c["expires"]
+        result.append(cookie)
+    return result
 
 
 def save_cookies_file(cookies: list[dict], path: str | Path) -> None:

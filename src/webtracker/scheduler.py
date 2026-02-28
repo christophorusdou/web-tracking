@@ -6,7 +6,7 @@ import asyncio
 import logging
 import random
 import time
-from datetime import datetime
+from datetime import datetime, time
 
 from webtracker.config import AppConfig, EngineType, ScheduleConfig, TrackerConfig
 from webtracker.engine.base import Engine
@@ -139,22 +139,29 @@ class TrackerRunner:
         self._running = False
 
 
+def _parse_time(s: str) -> time:
+    """Parse 'HH:MM' into a time object."""
+    h, m = s.split(":")
+    return time(int(h), int(m))
+
+
+# Cache parsed active hours to avoid re-parsing every loop iteration
+_active_hours_cache: dict[str, tuple[time, time]] = {}
+
+
 def _is_in_active_hours(schedule: ScheduleConfig) -> bool:
     """Check if the current time falls within the active hours window."""
     if not schedule.active_hours:
         return True
 
-    parts = schedule.active_hours.split("-")
-    if len(parts) != 2:
-        return True
+    if schedule.active_hours not in _active_hours_cache:
+        parts = schedule.active_hours.split("-")
+        if len(parts) != 2:
+            return True
+        _active_hours_cache[schedule.active_hours] = (_parse_time(parts[0]), _parse_time(parts[1]))
 
+    start, end = _active_hours_cache[schedule.active_hours]
     now = datetime.now().time()
-    start_h, start_m = map(int, parts[0].split(":"))
-    end_h, end_m = map(int, parts[1].split(":"))
-
-    from datetime import time as dt_time
-    start = dt_time(start_h, start_m)
-    end = dt_time(end_h, end_m)
 
     if start <= end:
         return start <= now <= end

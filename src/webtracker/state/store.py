@@ -16,7 +16,14 @@ class StateStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_tables()
+
+    def __enter__(self) -> StateStore:
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     def _init_tables(self) -> None:
         self._conn.executescript("""
@@ -52,6 +59,8 @@ class StateStore:
 
             CREATE INDEX IF NOT EXISTS idx_notif_tracker_rule
                 ON notification_log(tracker_id, rule_index);
+            CREATE INDEX IF NOT EXISTS idx_notif_sent_at
+                ON notification_log(sent_at);
             CREATE INDEX IF NOT EXISTS idx_history_tracker_field
                 ON value_history(tracker_id, field_name);
             CREATE INDEX IF NOT EXISTS idx_error_tracker
@@ -92,16 +101,6 @@ class StateStore:
 
     # ── Notification Cooldown ────────────────────────────
 
-    def last_notification_time(self, tracker_id: str, rule_index: int) -> float | None:
-        """Get the timestamp of the last notification for a tracker/rule combo."""
-        row = self._conn.execute(
-            "SELECT MAX(sent_at) as last_sent FROM notification_log WHERE tracker_id = ? AND rule_index = ?",
-            (tracker_id, rule_index),
-        ).fetchone()
-        if row is None or row["last_sent"] is None:
-            return None
-        return row["last_sent"]
-
     def record_notification(
         self, tracker_id: str, rule_index: int, channel: str, message: str
     ) -> None:
@@ -114,10 +113,12 @@ class StateStore:
 
     def is_in_cooldown(self, tracker_id: str, rule_index: int, cooldown_seconds: int) -> bool:
         """Check if a notification is still in cooldown period."""
-        last = self.last_notification_time(tracker_id, rule_index)
-        if last is None:
-            return False
-        return (time.time() - last) < cooldown_seconds
+        cutoff = time.time() - cooldown_seconds
+        row = self._conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM notification_log WHERE tracker_id = ? AND rule_index = ? AND sent_at > ?) AS in_cooldown",
+            (tracker_id, rule_index, cutoff),
+        ).fetchone()
+        return bool(row["in_cooldown"])
 
     # ── Errors ───────────────────────────────────────────
 
@@ -131,15 +132,13 @@ class StateStore:
 
     def consecutive_error_count(self, tracker_id: str) -> int:
         """Count consecutive errors since last successful run."""
-        last_success_row = self._conn.execute(
-            "SELECT MAX(updated_at) as t FROM tracker_state WHERE tracker_id = ?",
-            (tracker_id,),
-        ).fetchone()
-        last_success = last_success_row["t"] if last_success_row and last_success_row["t"] else 0
-
         row = self._conn.execute(
-            "SELECT COUNT(*) as cnt FROM error_log WHERE tracker_id = ? AND occurred_at > ?",
-            (tracker_id, last_success),
+            """SELECT COUNT(*) as cnt FROM error_log
+               WHERE tracker_id = ?
+                 AND occurred_at > COALESCE(
+                     (SELECT MAX(updated_at) FROM tracker_state WHERE tracker_id = ?), 0
+                 )""",
+            (tracker_id, tracker_id),
         ).fetchone()
         return row["cnt"] if row else 0
 

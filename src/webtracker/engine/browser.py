@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from webtracker.config import ActionType, AuthType, BrowserSettings, TrackerConfig
+from webtracker.auth.cookies import cookies_as_playwright_list, load_cookies_file
+from webtracker.config import ActionType, AuthType, BrowserSettings, PageAction, TrackerConfig
 from webtracker.engine.base import Engine, FetchResult
 
 
@@ -15,39 +15,40 @@ class BrowserEngine(Engine):
     def __init__(self, settings: BrowserSettings) -> None:
         self._settings = settings
         self._playwright = None
-        self._browser = None
+        self._contexts: dict[str, object] = {}
 
-    async def _ensure_browser(self, tracker: TrackerConfig):
-        """Lazy-init Playwright and browser with the right profile."""
+    def _resolve_data_dir(self, tracker: TrackerConfig) -> str:
+        """Determine the user data dir for a tracker's auth config."""
+        if tracker.auth and tracker.auth.type == AuthType.BROWSER_PROFILE and tracker.auth.profile:
+            profile_dir = Path("./browser_profiles") / tracker.auth.profile
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            return str(profile_dir)
+        return self._settings.user_data_dir
+
+    async def _ensure_context(self, tracker: TrackerConfig):
+        """Lazy-init Playwright and get/create a cached browser context."""
         from playwright.async_api import async_playwright
 
         if self._playwright is None:
             self._playwright = await async_playwright().start()
 
-        # Determine user data dir based on auth config
-        user_data_dir = self._settings.user_data_dir
-        if tracker.auth and tracker.auth.type == AuthType.BROWSER_PROFILE and tracker.auth.profile:
-            profile_dir = Path("./browser_profiles") / tracker.auth.profile
-            profile_dir.mkdir(parents=True, exist_ok=True)
-            user_data_dir = str(profile_dir)
-
-        # Use persistent context for profile-based auth
-        context = await self._playwright.chromium.launch_persistent_context(
-            user_data_dir=user_data_dir,
-            headless=self._settings.headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        return context
+        data_dir = self._resolve_data_dir(tracker)
+        if data_dir not in self._contexts:
+            self._contexts[data_dir] = await self._playwright.chromium.launch_persistent_context(
+                user_data_dir=data_dir,
+                headless=self._settings.headless,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+        return self._contexts[data_dir]
 
     async def fetch(self, tracker: TrackerConfig) -> FetchResult:
-        context = await self._ensure_browser(tracker)
+        context = await self._ensure_context(tracker)
 
+        page = await context.new_page()
         try:
-            page = await context.new_page()
-
             # Load cookies if using cookie-based auth
             if tracker.auth and tracker.auth.type == AuthType.COOKIES and tracker.auth.file:
-                cookies = _load_browser_cookies(tracker.auth.file)
+                cookies = cookies_as_playwright_list(load_cookies_file(tracker.auth.file))
                 if cookies:
                     await context.add_cookies(cookies)
 
@@ -67,19 +68,23 @@ class BrowserEngine(Engine):
             html = await page.content()
             url = page.url
 
-            await page.close()
-
             return FetchResult(html=html, status_code=200, url=url)
         finally:
-            await context.close()
+            await page.close()
 
     async def close(self) -> None:
+        for context in self._contexts.values():
+            try:
+                await context.close()
+            except Exception:
+                pass
+        self._contexts.clear()
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None
 
 
-async def _perform_action(page, action) -> None:
+async def _perform_action(page: object, action: PageAction) -> None:
     """Execute a page action (click, scroll, wait, type)."""
     if action.type == ActionType.CLICK:
         if action.selector:
@@ -93,30 +98,3 @@ async def _perform_action(page, action) -> None:
     elif action.type == ActionType.TYPE:
         if action.selector and action.text:
             await page.fill(action.selector, action.text)
-
-
-def _load_browser_cookies(path: str) -> list[dict]:
-    """Load cookies in Playwright format from a JSON file."""
-    cookie_path = Path(path)
-    if not cookie_path.exists():
-        return []
-
-    with open(cookie_path) as f:
-        data = json.load(f)
-
-    if isinstance(data, list):
-        # Ensure each cookie has required fields for Playwright
-        result = []
-        for c in data:
-            if "name" in c and "value" in c:
-                cookie = {
-                    "name": c["name"],
-                    "value": c["value"],
-                    "domain": c.get("domain", ""),
-                    "path": c.get("path", "/"),
-                }
-                if "expires" in c:
-                    cookie["expires"] = c["expires"]
-                result.append(cookie)
-        return result
-    return []
