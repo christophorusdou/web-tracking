@@ -384,33 +384,34 @@ web-tracking/
 ├── docker-compose.yaml          # one-command deployment
 ├── Dockerfile
 ├── pyproject.toml               # Python project config (dependencies)
+├── README.md                    # project overview and reference
+├── SETUP.md                     # installation and setup guide
 │
 ├── src/
 │   └── webtracker/
 │       ├── __init__.py
 │       ├── __main__.py          # CLI entry point
 │       ├── cli.py               # click-based CLI commands
-│       ├── config.py            # YAML config loader & validation
-│       ├── scheduler.py         # APScheduler orchestration
+│       ├── config.py            # YAML config loader & Pydantic models
+│       ├── scheduler.py         # async scheduler with retry/backoff
+│       ├── dashboard.py         # FastAPI web dashboard
 │       │
 │       ├── engine/              # page fetching
 │       │   ├── __init__.py
-│       │   ├── base.py          # abstract Engine interface
-│       │   ├── browser.py       # Playwright browser engine
-│       │   └── http.py          # httpx HTTP engine
+│       │   ├── base.py          # FetchResult dataclass
+│       │   ├── browser.py       # Playwright browser engine (cached contexts)
+│       │   ├── http.py          # httpx HTTP engine (per-proxy client pooling)
+│       │   └── useragents.py    # user-agent rotation
 │       │
 │       ├── extract/             # data extraction from pages
 │       │   ├── __init__.py
-│       │   ├── base.py          # abstract Extractor
 │       │   ├── css.py           # CSS selector extraction
-│       │   ├── xpath.py         # XPath extraction
-│       │   ├── jsonpath.py      # JSON path extraction (for APIs)
 │       │   └── transforms.py    # strip, to_number, regex, hash, etc.
 │       │
 │       ├── rules/               # condition evaluation
 │       │   ├── __init__.py
-│       │   ├── engine.py        # rule evaluation logic
-│       │   └── operators.py     # equals, less_than, changed, etc.
+│       │   ├── engine.py        # rule evaluation + message formatting
+│       │   └── operators.py     # 14 operators (equals, changed, etc.)
 │       │
 │       ├── notify/              # notification channels
 │       │   ├── __init__.py
@@ -418,28 +419,30 @@ web-tracking/
 │       │   ├── ntfy.py
 │       │   ├── pushover.py
 │       │   ├── telegram.py
-│       │   ├── email.py
+│       │   ├── email.py         # async SMTP via asyncio.to_thread
 │       │   ├── webhook.py       # generic webhook (covers IFTTT, etc.)
-│       │   └── dispatcher.py    # routes to channels, handles cooldown
+│       │   └── dispatcher.py    # routing, cooldown, concurrent sends
 │       │
 │       ├── state/               # persistence
 │       │   ├── __init__.py
-│       │   └── store.py         # SQLite state management
+│       │   └── store.py         # SQLite with WAL mode
 │       │
 │       └── auth/                # authentication helpers
 │           ├── __init__.py
-│           ├── cookies.py       # cookie import/export
+│           ├── cookies.py       # cookie load/save/convert
 │           └── profiles.py      # browser profile management
 │
 ├── browser_profiles/            # persistent browser sessions
 ├── cookies/                     # exported cookie files
 ├── data/                        # SQLite DB, logs
 │
-└── tests/
+└── tests/                       # 58 tests
     ├── test_config.py
-    ├── test_rules.py
     ├── test_extractors.py
-    └── test_notifications.py
+    ├── test_rules.py
+    ├── test_state.py
+    ├── test_retry.py
+    └── test_useragents.py
 ```
 
 ---
@@ -516,35 +519,35 @@ services:
 
 ## Implementation Phases
 
-### Phase 1 — Core (MVP)
+All phases are complete.
+
+### Phase 1 — Core (MVP) ✓
 - Config loader with validation (Pydantic)
 - HTTP engine (httpx) + CSS selector extraction
-- Rule engine with basic operators (equals, contains, less_than, changed)
-- SQLite state store
+- Rule engine with 14 operators (equals, contains, less_than, changed, and more)
+- SQLite state store with WAL mode
 - Ntfy.sh notification channel
-- CLI: `run`, `test`, `notify test`
-- **Deliverable**: Can track Amazon price, Best Buy stock (simple pages)
+- CLI: `run`, `test`, `status`, `history`, `notify test`, `config validate`
 
-### Phase 2 — Browser Engine
-- Playwright browser engine
+### Phase 2 — Browser Engine ✓
+- Playwright browser engine with cached contexts
 - Browser profile management (auth setup/teardown)
-- Cookie import/export
-- Wait-for and scroll actions
-- **Deliverable**: Can track Facebook posts, TGTG, any JS-heavy page
+- Cookie import/export with canonical format
+- Wait-for, scroll, click, and type actions
 
-### Phase 3 — Full Notifications
-- Pushover, Telegram, Email, Webhook channels
-- Notification templates with variable substitution
+### Phase 3 — Full Notifications ✓
+- Pushover, Telegram, Email (async SMTP), Webhook channels
+- Notification templates with `${variable}` substitution
 - Cooldown and deduplication
-- Priority escalation (e.g., notify email after 3 failed pushes)
+- Concurrent notification dispatch via asyncio.gather
+- Error notification after configurable threshold
 
-### Phase 4 — Polish
-- Docker packaging
+### Phase 4 — Polish ✓
+- Docker packaging with docker-compose (tracker + dashboard)
 - Active hours / schedule windows
-- Error notification (alert if tracker broken for N checks)
-- Value history + trends
-- Anti-detection features (jitter, user-agent rotation, proxy)
-- Optional web dashboard for status monitoring
+- Anti-detection: user-agent rotation (10 built-in UAs), per-tracker proxy, request jitter
+- Retry with exponential backoff
+- FastAPI web dashboard with auto-refresh
 
 ---
 
