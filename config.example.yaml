@@ -1,0 +1,208 @@
+# ─── Web Tracker Configuration ───────────────────────────
+# Copy this file to config.yaml and customize.
+# Environment variables can be referenced as ${VAR_NAME}
+
+settings:
+  browser:
+    headless: true
+    user_data_dir: "./browser_profiles/default"
+    default_timeout: 30000    # ms
+  state_db: "./data/state.db"
+  log_level: info             # debug, info, warning, error
+
+# ─── Notification Channels ───────────────────────────────
+# Define your notification channels here. Each tracker can
+# specify which channels to use, or fall back to defaults.
+
+notifications:
+  channels:
+    # Ntfy.sh — Free, instant, no signup needed
+    # Install the ntfy app on your phone, subscribe to your topic
+    ntfy_phone:
+      type: ntfy
+      server: "https://ntfy.sh"       # or your self-hosted instance
+      topic: "my-web-alerts"           # pick a unique, hard-to-guess topic
+      priority: high
+
+    # Pushover — $5 one-time purchase, very reliable
+    # pushover_urgent:
+    #   type: pushover
+    #   user_key: "${PUSHOVER_USER}"
+    #   api_token: "${PUSHOVER_TOKEN}"
+    #   priority: 0                    # -1=low, 0=normal, 1=high, 2=emergency
+    #   sound: "pushover"
+
+    # Telegram Bot — Free, rich formatting
+    # telegram:
+    #   type: telegram
+    #   bot_token: "${TELEGRAM_BOT_TOKEN}"
+    #   chat_id: "${TELEGRAM_CHAT_ID}"
+
+    # Email via SMTP
+    # email_backup:
+    #   type: email
+    #   smtp_host: "smtp.gmail.com"
+    #   smtp_port: 587
+    #   username: "${EMAIL_USER}"
+    #   password: "${EMAIL_PASS}"       # use app-specific password for Gmail
+    #   from: "alerts@example.com"
+    #   to: "me@example.com"
+
+    # Generic Webhook (IFTTT, Slack, Discord, etc.)
+    # ifttt:
+    #   type: webhook
+    #   url: "https://maker.ifttt.com/trigger/web_alert/with/key/${IFTTT_KEY}"
+    #   method: POST
+
+  defaults:
+    channels: [ntfy_phone]       # which channels all trackers use by default
+    cooldown: 300                # don't re-notify for same condition within 5 min
+    on_error_notify: true        # notify if a tracker fails repeatedly
+    error_threshold: 3           # after this many consecutive failures
+
+# ─── Trackers ────────────────────────────────────────────
+# Each tracker monitors a web page for specific conditions.
+
+trackers:
+  # ── Example 1: Best Buy In-Stock Tracking ─────────────
+  bestbuy_example:
+    name: "Best Buy - Product Stock"
+    engine: browser                    # use browser for JS-rendered pages
+    url: "https://www.bestbuy.com/site/some-product/1234567.p"
+    schedule:
+      interval: 60                     # check every 60 seconds
+      jitter: 10                       # random ±10s to look more human
+    # No auth needed for public product pages
+
+    extract:
+      - name: button_text
+        selector: "button.add-to-cart-button"
+        attribute: text
+        transform: [strip, lowercase]
+      - name: price
+        selector: ".priceView-customer-price span"
+        attribute: text
+        transform: [strip, to_number]
+
+    rules:
+      - condition:
+          field: button_text
+          operator: contains
+          value: "add to cart"
+        message: "IN STOCK! Price: $${price}"
+        # Override default channels for high-priority alerts:
+        # channels: [ntfy_phone, pushover_urgent]
+        priority: high
+
+  # ── Example 2: Amazon Price Drop ──────────────────────
+  amazon_example:
+    name: "Amazon - Price Watch"
+    engine: http                       # HTTP is faster, works for Amazon prices
+    url: "https://www.amazon.com/dp/B0EXAMPLE"
+    headers:
+      User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    schedule:
+      interval: 300                    # every 5 minutes
+
+    # Optional: use cookies for logged-in prices
+    # auth:
+    #   type: cookies
+    #   file: "./cookies/amazon.json"
+
+    extract:
+      - name: price
+        selector: "span.a-price .a-offscreen"
+        attribute: text
+        transform: [strip, "regex_extract('\\$([\\d.]+)')", to_number]
+      - name: title
+        selector: "#productTitle"
+        attribute: text
+        transform: [strip]
+
+    rules:
+      # Alert if price drops below a threshold
+      - condition:
+          field: price
+          operator: less_than
+          value: 280
+        message: "${title} is now $${price}!"
+
+      # Alert if price dropped 10%+ since last check
+      - condition:
+          field: price
+          operator: decreased_by_percent
+          value: 10
+        message: "${title} dropped ${change_percent}%! Now $${price}"
+
+  # ── Example 3: Facebook New Post ──────────────────────
+  # Requires browser engine + a logged-in browser profile.
+  # First run: webtracker auth setup facebook --url https://facebook.com
+  #
+  # facebook_friend:
+  #   name: "Facebook - Someone's Posts"
+  #   engine: browser
+  #   url: "https://www.facebook.com/someone"
+  #   schedule:
+  #     interval: 30
+  #   auth:
+  #     type: browser_profile
+  #     profile: "facebook"
+  #   wait_for:
+  #     selector: "[role='article']"
+  #     timeout: 10000
+  #   actions:
+  #     - type: scroll
+  #       amount: 500
+  #   extract:
+  #     - name: latest_post_text
+  #       selector: "[role='article']:first-of-type [data-ad-preview='message']"
+  #       attribute: text
+  #       transform: [strip, "truncate(200)"]
+  #   rules:
+  #     - condition:
+  #         field: latest_post_text
+  #         operator: changed
+  #       message: "New post: ${latest_post_text}"
+  #       priority: high
+
+  # ── Example 4: Too Good To Go ─────────────────────────
+  # tgtg_bakery:
+  #   name: "TGTG - Local Bakery"
+  #   engine: browser
+  #   url: "https://share.toogoodtogo.com/item/123456"
+  #   schedule:
+  #     interval: 45
+  #     active_hours: "07:00-21:00"    # no point checking at night
+  #   auth:
+  #     type: browser_profile
+  #     profile: "tgtg"
+  #   extract:
+  #     - name: availability
+  #       selector: ".item-availability"
+  #       attribute: text
+  #       transform: [strip, lowercase]
+  #   rules:
+  #     - condition:
+  #         field: availability
+  #         operator: not_contains
+  #         value: "sold out"
+  #       message: "TGTG bags available!"
+  #       priority: emergency
+
+  # ── Example 5: Generic Page Change Detection ──────────
+  # page_watcher:
+  #   name: "Watch for any changes"
+  #   engine: http
+  #   url: "https://example.com/some-page"
+  #   schedule:
+  #     interval: 600
+  #   extract:
+  #     - name: content_hash
+  #       selector: "#main-content"
+  #       attribute: text
+  #       transform: [strip, collapse_whitespace, hash_md5]
+  #   rules:
+  #     - condition:
+  #         field: content_hash
+  #         operator: changed
+  #       message: "Page content has changed!"

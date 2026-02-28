@@ -1,0 +1,17 @@
+services:
+  webtracker:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./browser_profiles:/app/browser_profiles
+      - ./cookies:/app/cookies:ro
+    environment:
+      - PUSHOVER_USER=${PUSHOVER_USER:-}
+      - PUSHOVER_TOKEN=${PUSHOVER_TOKEN:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - IFTTT_KEY=${IFTTT_KEY:-}
+      - EMAIL_USER=${EMAIL_USER:-}
+      - EMAIL_PASS=${EMAIL_PASS:-}
