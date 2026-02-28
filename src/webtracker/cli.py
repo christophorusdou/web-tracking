@@ -294,3 +294,29 @@ def auth_list() -> None:
 
     for p in profiles:
         console.print(f"  [cyan]{p}[/cyan]")
+
+
+# ── Dashboard Command ────────────────────────────────────
+
+
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Bind address")
+@click.option("--port", "-p", default=8080, help="Port")
+@click.pass_context
+def dashboard(ctx: click.Context, host: str, port: int) -> None:
+    """Start the web dashboard for monitoring trackers."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Dashboard requires extra dependencies.[/red]")
+        console.print("Install with: pip install webtracker[dashboard]")
+        sys.exit(1)
+
+    from webtracker.dashboard import create_app
+
+    config = load_config(ctx.obj["config_path"])
+    _setup_logging(config.settings.log_level)
+
+    app = create_app(config)
+    console.print(f"[green]Dashboard starting at http://{host}:{port}[/green]")
+    uvicorn.run(app, host=host, port=port, log_level=config.settings.log_level)

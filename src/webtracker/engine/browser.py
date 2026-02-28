@@ -7,6 +7,7 @@ from pathlib import Path
 from webtracker.auth.cookies import cookies_as_playwright_list, load_cookies_file
 from webtracker.config import ActionType, AuthType, BrowserSettings, PageAction, TrackerConfig
 from webtracker.engine.base import Engine, FetchResult
+from webtracker.engine.useragents import get_user_agent
 
 
 class BrowserEngine(Engine):
@@ -15,7 +16,8 @@ class BrowserEngine(Engine):
     def __init__(self, settings: BrowserSettings) -> None:
         self._settings = settings
         self._playwright = None
-        self._contexts: dict[str, object] = {}
+        # Contexts keyed by (data_dir, proxy) tuple
+        self._contexts: dict[tuple[str, str | None], object] = {}
 
     def _resolve_data_dir(self, tracker: TrackerConfig) -> str:
         """Determine the user data dir for a tracker's auth config."""
@@ -33,13 +35,21 @@ class BrowserEngine(Engine):
             self._playwright = await async_playwright().start()
 
         data_dir = self._resolve_data_dir(tracker)
-        if data_dir not in self._contexts:
-            self._contexts[data_dir] = await self._playwright.chromium.launch_persistent_context(
-                user_data_dir=data_dir,
-                headless=self._settings.headless,
-                args=["--disable-blink-features=AutomationControlled"],
+        key = (data_dir, tracker.proxy)
+        if key not in self._contexts:
+            launch_kwargs: dict = {
+                "user_data_dir": data_dir,
+                "headless": self._settings.headless,
+                "user_agent": get_user_agent(tracker),
+                "args": ["--disable-blink-features=AutomationControlled"],
+            }
+            if tracker.proxy:
+                launch_kwargs["proxy"] = {"server": tracker.proxy}
+
+            self._contexts[key] = await self._playwright.chromium.launch_persistent_context(
+                **launch_kwargs,
             )
-        return self._contexts[data_dir]
+        return self._contexts[key]
 
     async def fetch(self, tracker: TrackerConfig) -> FetchResult:
         context = await self._ensure_context(tracker)

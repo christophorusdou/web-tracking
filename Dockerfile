@@ -11,7 +11,7 @@ WORKDIR /app
 
 # Install Python dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir . && \
+RUN pip install --no-cache-dir ".[dashboard]" && \
     playwright install chromium && \
     playwright install-deps chromium
 

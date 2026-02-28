@@ -9,7 +9,7 @@ import time
 from datetime import datetime, time
 
 from webtracker.config import AppConfig, EngineType, ScheduleConfig, TrackerConfig
-from webtracker.engine.base import Engine
+from webtracker.engine.base import Engine, FetchResult
 from webtracker.engine.browser import BrowserEngine
 from webtracker.engine.http import HttpEngine
 from webtracker.extract.css import extract_fields
@@ -36,6 +36,26 @@ class TrackerRunner:
             return self._browser_engine
         return self._http_engine
 
+    async def _fetch_with_retry(self, engine: Engine, tracker: TrackerConfig) -> FetchResult:
+        """Fetch a page with configurable retry and exponential backoff."""
+        schedule = tracker.schedule
+        last_error: Exception | None = None
+
+        for attempt in range(schedule.retry_count + 1):
+            try:
+                return await engine.fetch(tracker)
+            except Exception as e:
+                last_error = e
+                if attempt < schedule.retry_count:
+                    delay = schedule.retry_delay * (2 ** attempt)
+                    logger.warning(
+                        "Tracker '%s' fetch failed (attempt %d/%d), retrying in %ds: %s",
+                        tracker.name, attempt + 1, schedule.retry_count + 1, delay, e,
+                    )
+                    await asyncio.sleep(delay)
+
+        raise last_error  # type: ignore[misc]
+
     async def run_once(self, tracker_id: str) -> dict:
         """Run a single tracker check. Returns extracted values."""
         tracker = self._config.trackers[tracker_id]
@@ -43,8 +63,8 @@ class TrackerRunner:
 
         logger.info("Checking tracker '%s' (%s)", tracker_id, tracker.name)
 
-        # Fetch page
-        result = await engine.fetch(tracker)
+        # Fetch page (with retry if configured)
+        result = await self._fetch_with_retry(engine, tracker)
         logger.debug("Fetched %s (%d bytes)", result.url, len(result.html))
 
         # Extract values

@@ -7,32 +7,29 @@ import httpx
 from webtracker.auth.cookies import cookies_as_httpx_dict, load_cookies_file
 from webtracker.config import AuthType, TrackerConfig
 from webtracker.engine.base import Engine, FetchResult
-
-_DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
-)
+from webtracker.engine.useragents import get_user_agent
 
 
 class HttpEngine(Engine):
     """Fetches pages using HTTP requests (no JavaScript rendering)."""
 
     def __init__(self) -> None:
-        self._client: httpx.AsyncClient | None = None
+        # Clients keyed by proxy URL (None = no proxy)
+        self._clients: dict[str | None, httpx.AsyncClient] = {}
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(
+    def _get_client(self, proxy: str | None) -> httpx.AsyncClient:
+        if proxy not in self._clients:
+            self._clients[proxy] = httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=30.0,
+                proxy=proxy,
             )
-        return self._client
+        return self._clients[proxy]
 
     async def fetch(self, tracker: TrackerConfig) -> FetchResult:
-        client = await self._get_client()
+        client = self._get_client(tracker.proxy)
 
-        headers = {"User-Agent": _DEFAULT_USER_AGENT}
+        headers = {"User-Agent": get_user_agent(tracker)}
         headers.update(tracker.headers)
 
         cookies: dict[str, str] = {}
@@ -49,6 +46,6 @@ class HttpEngine(Engine):
         )
 
     async def close(self) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        for client in self._clients.values():
+            await client.aclose()
+        self._clients.clear()

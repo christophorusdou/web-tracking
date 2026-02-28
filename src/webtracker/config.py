@@ -175,6 +175,8 @@ class ScheduleConfig(BaseModel):
     interval: int = 300  # seconds
     jitter: int = 0
     active_hours: str | None = None  # e.g. "07:00-21:00"
+    retry_count: int = 0  # max retries on fetch failure (0 = no retry)
+    retry_delay: int = 5  # initial backoff in seconds (doubles each retry)
 
     @field_validator("active_hours")
     @classmethod
@@ -233,6 +235,8 @@ class TrackerConfig(BaseModel):
     engine: EngineType = EngineType.HTTP
     url: str
     headers: dict[str, str] = Field(default_factory=dict)
+    proxy: str | None = None
+    user_agents: list[str] = Field(default_factory=list)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     auth: AuthConfig | None = None
     wait_for: WaitForConfig | None = None

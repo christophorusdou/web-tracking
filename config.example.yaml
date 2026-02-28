@@ -72,6 +72,8 @@ trackers:
     schedule:
       interval: 60                     # check every 60 seconds
       jitter: 10                       # random ±10s to look more human
+      retry_count: 2                   # retry up to 2 times on failure
+      retry_delay: 5                   # initial backoff: 5s, then 10s
     # No auth needed for public product pages
 
     extract:
@@ -99,10 +101,14 @@ trackers:
     name: "Amazon - Price Watch"
     engine: http                       # HTTP is faster, works for Amazon prices
     url: "https://www.amazon.com/dp/B0EXAMPLE"
-    headers:
-      User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    # proxy: "http://user:pass@proxy:8080"  # optional per-tracker proxy
+    # user_agents:                           # optional custom UA rotation
+    #   - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ..."
+    #   - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ..."
     schedule:
       interval: 300                    # every 5 minutes
+      retry_count: 3                   # retry up to 3 times on failure
+      retry_delay: 10                  # initial backoff: 10s, 20s, 40s
 
     # Optional: use cookies for logged-in prices
     # auth:
