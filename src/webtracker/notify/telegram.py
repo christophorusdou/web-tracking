@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 
@@ -10,6 +11,13 @@ from webtracker.config import TelegramConfig
 from webtracker.notify.base import Notifier
 
 logger = logging.getLogger(__name__)
+
+_MARKDOWN_SPECIAL = re.compile(r"([*_`\[\]])")
+
+
+def _escape_markdown(text: str) -> str:
+    """Escape Telegram Markdown special characters."""
+    return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
 
 
 class TelegramNotifier(Notifier):
@@ -27,7 +35,11 @@ class TelegramNotifier(Notifier):
     async def send(self, message: str, title: str = "", priority: str = "") -> bool:
         client = await self._get_client()
 
-        text = f"*{title}*\n\n{message}" if title else message
+        escaped_msg = _escape_markdown(message)
+        if title:
+            text = f"*{_escape_markdown(title)}*\n\n{escaped_msg}"
+        else:
+            text = escaped_msg
         url = f"https://api.telegram.org/bot{self._config.bot_token}/sendMessage"
 
         data = {

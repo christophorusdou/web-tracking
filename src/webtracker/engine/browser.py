@@ -54,8 +54,10 @@ class BrowserEngine(Engine):
     async def fetch(self, tracker: TrackerConfig) -> FetchResult:
         context = await self._ensure_context(tracker)
 
-        page = await context.new_page()
+        page = None
         try:
+            page = await context.new_page()
+
             # Load cookies if using cookie-based auth
             if tracker.auth and tracker.auth.type == AuthType.COOKIES and tracker.auth.file:
                 cookies = cookies_as_playwright_list(load_cookies_file(tracker.auth.file))
@@ -80,7 +82,8 @@ class BrowserEngine(Engine):
 
             return FetchResult(html=html, status_code=200, url=url)
         finally:
-            await page.close()
+            if page is not None:
+                await page.close()
 
     async def close(self) -> None:
         for context in self._contexts.values():

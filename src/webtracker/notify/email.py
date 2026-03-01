@@ -36,7 +36,12 @@ class EmailNotifier(Notifier):
             return False
 
     def _send_smtp(self, msg: MIMEText) -> None:
-        with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port) as server:
-            server.starttls()
-            server.login(self._config.username, self._config.password)
-            server.send_message(msg)
+        if self._config.smtp_port == 465:
+            with smtplib.SMTP_SSL(self._config.smtp_host, self._config.smtp_port, timeout=10) as server:
+                server.login(self._config.username, self._config.password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(self._config.smtp_host, self._config.smtp_port, timeout=10) as server:
+                server.starttls()
+                server.login(self._config.username, self._config.password)
+                server.send_message(msg)

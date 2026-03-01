@@ -57,7 +57,8 @@ class TrackerRunner:
                     )
                     await asyncio.sleep(delay)
 
-        assert last_error is not None, "retry loop exited without setting last_error"
+        if last_error is None:
+            raise RuntimeError("retry loop exited without setting last_error")
         raise last_error
 
     async def run_once(self, tracker_id: str) -> dict:
@@ -124,9 +125,9 @@ class TrackerRunner:
                 self._store.record_error(tracker_id, str(e))
                 await self._dispatcher.notify_error(tracker_id, str(e))
 
-            # Wait for next interval with jitter
+            # Wait for next interval with jitter (clamped to at least half the interval)
             jitter = random.randint(-schedule.jitter, schedule.jitter) if schedule.jitter else 0
-            wait_time = max(10, schedule.interval + jitter)
+            wait_time = max(schedule.interval // 2, schedule.interval + jitter)
             logger.debug("Tracker '%s' sleeping %ds", tracker_id, wait_time)
             await asyncio.sleep(wait_time)
 
