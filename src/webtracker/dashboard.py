@@ -5,6 +5,8 @@ from __future__ import annotations
 import time as _time
 from datetime import datetime
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
@@ -16,8 +18,14 @@ _start_time = _time.time()
 
 def create_app(config: AppConfig) -> FastAPI:
     """Create a FastAPI dashboard app bound to the given config."""
-    app = FastAPI(title="WebTracker Dashboard", version="0.1.0")
     store = StateStore(config.settings.state_db)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        store.close()
+
+    app = FastAPI(title="WebTracker Dashboard", version="0.1.0", lifespan=lifespan)
 
     @app.get("/", response_class=HTMLResponse)
     async def index():

@@ -14,7 +14,9 @@ class StateStore:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path))
+        self._conn: sqlite3.Connection | None = sqlite3.connect(
+            str(self.db_path), timeout=10
+        )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_tables()
@@ -180,5 +182,24 @@ class StateStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def cleanup(self, max_age_days: int = 90) -> int:
+        """Delete history and notification entries older than max_age_days. Returns rows deleted."""
+        if self._conn is None:
+            return 0
+        cutoff = time.time() - (max_age_days * 86400)
+        c1 = self._conn.execute(
+            "DELETE FROM value_history WHERE recorded_at < ?", (cutoff,)
+        ).rowcount
+        c2 = self._conn.execute(
+            "DELETE FROM notification_log WHERE sent_at < ?", (cutoff,)
+        ).rowcount
+        c3 = self._conn.execute(
+            "DELETE FROM error_log WHERE occurred_at < ?", (cutoff,)
+        ).rowcount
+        self._conn.commit()
+        return c1 + c2 + c3
+
     def close(self) -> None:
-        self._conn.close()
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None

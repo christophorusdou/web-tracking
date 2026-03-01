@@ -124,9 +124,9 @@ def _parse_channel(data: dict[str, Any]) -> ChannelConfig:
 
 class NotificationDefaults(BaseModel):
     channels: list[str] = Field(default_factory=lambda: ["ntfy_phone"])
-    cooldown: int = 300
+    cooldown: int = Field(default=300, ge=0)
     on_error_notify: bool = True
-    error_threshold: int = 3
+    error_threshold: int = Field(default=3, ge=1)
 
 
 class NotificationSettings(BaseModel):
@@ -172,11 +172,11 @@ class AuthConfig(BaseModel):
 
 
 class ScheduleConfig(BaseModel):
-    interval: int = 300  # seconds
-    jitter: int = 0
+    interval: int = Field(default=300, ge=10)  # seconds, minimum 10s
+    jitter: int = Field(default=0, ge=0)
     active_hours: str | None = None  # e.g. "07:00-21:00"
-    retry_count: int = 0  # max retries on fetch failure (0 = no retry)
-    retry_delay: int = 5  # initial backoff in seconds (doubles each retry)
+    retry_count: int = Field(default=0, ge=0, le=10)  # max retries on fetch failure
+    retry_delay: int = Field(default=5, ge=1, le=300)  # initial backoff in seconds
 
     @field_validator("active_hours")
     @classmethod

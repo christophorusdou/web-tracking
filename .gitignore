@@ -10,6 +10,9 @@ build/
 venv/
 env/
 
+# Config (may contain secrets — only track the example)
+config.yaml
+
 # Data
 data/*.db
 data/*.log

@@ -135,6 +135,12 @@ def status(ctx: click.Context) -> None:
 def history(ctx: click.Context, tracker_id: str, field: str | None, last: int) -> None:
     """View value history for a tracker."""
     config = load_config(ctx.obj["config_path"])
+
+    if tracker_id not in config.trackers:
+        console.print(f"[red]Tracker '{tracker_id}' not found in config[/red]")
+        console.print(f"Available: {', '.join(config.trackers.keys())}")
+        sys.exit(1)
+
     from datetime import datetime
 
     from webtracker.state.store import StateStore

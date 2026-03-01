@@ -76,7 +76,7 @@ class TestRetry:
     @pytest.mark.asyncio
     async def test_retry_on_failure_then_success(self, success_result):
         """Should retry and succeed after transient failure."""
-        config = _make_config(retry_count=2, retry_delay=0)
+        config = _make_config(retry_count=2, retry_delay=1)
         runner = TrackerRunner(config)
 
         mock_engine = AsyncMock()
@@ -96,7 +96,7 @@ class TestRetry:
     @pytest.mark.asyncio
     async def test_retry_exhausted_raises(self):
         """Should raise after all retries exhausted."""
-        config = _make_config(retry_count=2, retry_delay=0)
+        config = _make_config(retry_count=2, retry_delay=1)
         runner = TrackerRunner(config)
 
         mock_engine = AsyncMock()

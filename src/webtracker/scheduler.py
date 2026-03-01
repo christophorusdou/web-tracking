@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-import time
-from datetime import datetime, time
+from datetime import datetime
+from datetime import time as dt_time
 
 from webtracker.config import AppConfig, EngineType, ScheduleConfig, TrackerConfig
 from webtracker.engine.base import Engine, FetchResult
@@ -43,7 +43,10 @@ class TrackerRunner:
 
         for attempt in range(schedule.retry_count + 1):
             try:
-                return await engine.fetch(tracker)
+                timeout = self._config.settings.browser.default_timeout / 1000
+                return await asyncio.wait_for(engine.fetch(tracker), timeout=timeout)
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Fetch timed out after {timeout}s for '{tracker.name}'")
             except Exception as e:
                 last_error = e
                 if attempt < schedule.retry_count:
@@ -54,7 +57,8 @@ class TrackerRunner:
                     )
                     await asyncio.sleep(delay)
 
-        raise last_error  # type: ignore[misc]
+        assert last_error is not None, "retry loop exited without setting last_error"
+        raise last_error
 
     async def run_once(self, tracker_id: str) -> dict:
         """Run a single tracker check. Returns extracted values."""
@@ -159,14 +163,14 @@ class TrackerRunner:
         self._running = False
 
 
-def _parse_time(s: str) -> time:
+def _parse_time(s: str) -> dt_time:
     """Parse 'HH:MM' into a time object."""
     h, m = s.split(":")
-    return time(int(h), int(m))
+    return dt_time(int(h), int(m))
 
 
 # Cache parsed active hours to avoid re-parsing every loop iteration
-_active_hours_cache: dict[str, tuple[time, time]] = {}
+_active_hours_cache: dict[str, tuple[dt_time, dt_time]] = {}
 
 
 def _is_in_active_hours(schedule: ScheduleConfig) -> bool:

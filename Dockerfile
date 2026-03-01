@@ -18,8 +18,12 @@ RUN pip install --no-cache-dir ".[dashboard]" && \
 # Copy source code
 COPY src/ src/
 
-# Create data directories
-RUN mkdir -p data browser_profiles cookies
+# Create non-root user and data directories
+RUN groupadd -r webtracker && useradd -r -g webtracker -m webtracker \
+    && mkdir -p data browser_profiles cookies \
+    && chown -R webtracker:webtracker /app
+
+USER webtracker
 
 ENTRYPOINT ["webtracker"]
 CMD ["run"]

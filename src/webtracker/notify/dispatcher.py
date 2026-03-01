@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from webtracker.config import (
     ChannelConfig,
@@ -43,10 +44,14 @@ def _create_notifier(config: ChannelConfig) -> Notifier:
 class NotificationDispatcher:
     """Routes notifications to configured channels with cooldown enforcement."""
 
+    # Minimum seconds between error notifications for the same tracker
+    _ERROR_NOTIFY_COOLDOWN = 600  # 10 minutes
+
     def __init__(self, settings: NotificationSettings, store: StateStore) -> None:
         self._settings = settings
         self._store = store
         self._notifiers: dict[str, Notifier] = {}
+        self._last_error_notify: dict[str, float] = {}
 
         # Pre-create notifier instances
         for name, config in settings.channels.items():
@@ -117,24 +122,34 @@ class NotificationDispatcher:
         return await notifier.send(message=message, title="WebTracker Test")
 
     async def notify_error(self, tracker_id: str, error: str) -> None:
-        """Send an error notification if threshold is exceeded."""
+        """Send an error notification if threshold is exceeded (with cooldown)."""
         if not self._settings.defaults.on_error_notify:
             return
 
         error_count = self._store.consecutive_error_count(tracker_id)
-        if error_count >= self._settings.defaults.error_threshold:
-            msg = f"Tracker '{tracker_id}' has failed {error_count} times.\nLatest error: {error}"
-            notifiers = [
-                self._notifiers[name]
-                for name in self._settings.defaults.channels
-                if name in self._notifiers
-            ]
-            if notifiers:
-                await asyncio.gather(
-                    *(n.send(message=msg, title=f"WebTracker Error: {tracker_id}", priority="high")
-                      for n in notifiers),
-                    return_exceptions=True,
-                )
+        if error_count < self._settings.defaults.error_threshold:
+            return
+
+        # Prevent error notification spam — only re-send every _ERROR_NOTIFY_COOLDOWN seconds
+        now = time.time()
+        last_sent = self._last_error_notify.get(tracker_id, 0)
+        if now - last_sent < self._ERROR_NOTIFY_COOLDOWN:
+            logger.debug("Error notification for '%s' in cooldown, skipping", tracker_id)
+            return
+
+        msg = f"Tracker '{tracker_id}' has failed {error_count} times.\nLatest error: {error}"
+        notifiers = [
+            self._notifiers[name]
+            for name in self._settings.defaults.channels
+            if name in self._notifiers
+        ]
+        if notifiers:
+            await asyncio.gather(
+                *(n.send(message=msg, title=f"WebTracker Error: {tracker_id}", priority="high")
+                  for n in notifiers),
+                return_exceptions=True,
+            )
+            self._last_error_notify[tracker_id] = now
 
     async def close(self) -> None:
         for notifier in self._notifiers.values():
